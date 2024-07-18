@@ -1,19 +1,14 @@
 import {
   ConfigPlugin,
   ExportedConfigWithProps,
-  IOSConfig,
   withDangerousMod,
-  withInfoPlist,
-  withXcodeProject,
   withAndroidManifest,
   AndroidConfig,
-  AndroidManifest,
 } from "@expo/config-plugins";
 import { generateImageAsync } from "@expo/image-utils";
 import fs from "fs";
 import path from "path";
 // @ts-ignore
-import pbxFile from "xcode/lib/pbxFile";
 
 const {
   getMainApplicationOrThrow,
@@ -30,16 +25,15 @@ const androidFolderNames = [
 ];
 const androidSize = [162, 108, 216, 324, 432];
 
-const iosFolderName = "DynamicAppIcons";
-const iosSize = 60;
-const ipad152Scale = 2.53;
-const ipad167Scale = 2.78;
-const iosScales = [2, 3, ipad152Scale, ipad167Scale];
+const iosFolderName = "Images.xcassets/DynamicAppIcons";
+const iosSize = 1024;
 
 type Platform = "ios" | "android";
 
 type Icon = { 
   image: string; 
+  iosImageDark: string;
+  iosImageTinted: string;
   prerendered?: boolean, 
   platforms?: Platform[]
 }
@@ -86,8 +80,6 @@ const withDynamicIcon: ConfigPlugin<string[] | IconSet | void> = (
   const iOSIcons = findIconsForPlatform(prepped, "ios");
   const iOSIconsLength = Object.keys(iOSIcons).length;
   if (iOSIconsLength > 0) {
-    config = withIconXcodeProject(config, { icons: iOSIcons });
-    config = withIconInfoPlist(config, { icons: iOSIcons });
     config = withIconIosImages(config, { icons: iOSIcons });
   }
   const androidIcons = findIconsForPlatform(prepped, "android");
@@ -190,9 +182,8 @@ const withIconAndroidImages: ConfigPlugin<Props> = (config, { icons }) => {
               {
                 name: fileName,
                 src: image,
-                // removeTransparency: true,
                 backgroundColor: "#ffffff",
-                resizeMode: "cover",
+                resizeMode: "contain",
                 width: size,
                 height: size,
               }
@@ -203,15 +194,6 @@ const withIconAndroidImages: ConfigPlugin<Props> = (config, { icons }) => {
             );
           }
         }
-        // for (const size of ) {
-        //   // size
-        //   const iconFileName = "";
-        //   const fileName = path.join(iosFolderName, iconFileName);
-        //   const outputPath = path.join(iosRoot, fileName);
-
-        //   const scaledSize = scale * iosSize;
-
-        // }
       };
 
       await removeIconRes();
@@ -223,143 +205,10 @@ const withIconAndroidImages: ConfigPlugin<Props> = (config, { icons }) => {
 };
 
 // for ios
-function getIconName(name: string, size: number, scale?: number) {
-  
-  const fileName = `${name}-Icon-$${size}x${size}`;
 
-  if (scale != null) {
-    if(scale == ipad152Scale){
-      return `${fileName}@2x~ipad.png`;
-    }
-    if(scale == ipad167Scale){
-      return `${fileName}@3x~ipad.png`;
-    }
-    return `${fileName}@${scale}x.png`;
-  }
-  return fileName;
+function getIconName(name: string, size: number) {
+  return `${name}-Icon-${size}x${size}`;
 }
-
-const withIconXcodeProject: ConfigPlugin<Props> = (config, { icons }) => {
-  return withXcodeProject(config, async (config) => {
-    const groupPath = `${config.modRequest.projectName!}/${iosFolderName}`;
-    const group = IOSConfig.XcodeUtils.ensureGroupRecursively(
-      config.modResults,
-      groupPath
-    );
-    const project = config.modResults;
-    const opt: any = {};
-
-    // Unlink old assets
-
-    const groupId = Object.keys(project.hash.project.objects["PBXGroup"]).find(
-      (id) => {
-        const _group = project.hash.project.objects["PBXGroup"][id];
-        return _group.name === group.name;
-      }
-    );
-    if (!project.hash.project.objects["PBXVariantGroup"]) {
-      project.hash.project.objects["PBXVariantGroup"] = {};
-    }
-    const variantGroupId = Object.keys(
-      project.hash.project.objects["PBXVariantGroup"]
-    ).find((id) => {
-      const _group = project.hash.project.objects["PBXVariantGroup"][id];
-      return _group.name === group.name;
-    });
-
-    const children = [...(group.children || [])];
-
-    for (const child of children as {
-      comment: string;
-      value: string;
-    }[]) {
-      const file = new pbxFile(path.join(group.name, child.comment), opt);
-      file.target = opt ? opt.target : undefined;
-
-      project.removeFromPbxBuildFileSection(file); // PBXBuildFile
-      project.removeFromPbxFileReferenceSection(file); // PBXFileReference
-      if (group) {
-        if (groupId) {
-          project.removeFromPbxGroup(file, groupId); //Group other than Resources (i.e. 'splash')
-        } else if (variantGroupId) {
-          project.removeFromPbxVariantGroup(file, variantGroupId); // PBXVariantGroup
-        }
-      }
-      project.removeFromPbxResourcesBuildPhase(file); // PBXResourcesBuildPhase
-    }
-
-    // Link new assets
-
-    await iterateIconsAsync({ icons }, async (key, icon, index) => {
-      for (const scale of iosScales) {
-        const iconFileName = getIconName(key, iosSize, scale);
-
-        if (
-          !group?.children.some(
-            ({ comment }: { comment: string }) => comment === iconFileName
-          )
-        ) {
-          // Only write the file if it doesn't already exist.
-          config.modResults = IOSConfig.XcodeUtils.addResourceFileToGroup({
-            filepath: path.join(groupPath, iconFileName),
-            groupName: groupPath,
-            project: config.modResults,
-            isBuildFile: true,
-            verbose: true,
-          });
-        } else {
-          console.log("Skipping duplicate: ", iconFileName);
-        }
-      }
-    });
-
-    return config;
-  });
-};
-
-const withIconInfoPlist: ConfigPlugin<Props> = (config, { icons }) => {
-  return withInfoPlist(config, async (config) => {
-    const altIcons: Record<
-      string,
-      { CFBundleIconFiles: string[]; UIPrerenderedIcon: boolean }
-    > = {};
-
-    await iterateIconsAsync({ icons }, async (key, icon) => {
-      altIcons[key] = {
-        CFBundleIconFiles: [
-          // Must be a file path relative to the source root (not a icon set it seems).
-          // i.e. `Bacon-Icon-60x60` when the image is `ios/somn/appIcons/Bacon-Icon-60x60@2x.png`
-          getIconName(key, iosSize),
-        ],
-        UIPrerenderedIcon: !!icon.prerendered,
-      };
-    });
-
-    function applyToPlist(key: string) {
-      if (
-        typeof config.modResults[key] !== "object" ||
-        Array.isArray(config.modResults[key]) ||
-        !config.modResults[key]
-      ) {
-        config.modResults[key] = {};
-      }
-
-      // @ts-expect-error
-      config.modResults[key].CFBundleAlternateIcons = altIcons;
-
-      // @ts-expect-error
-      config.modResults[key].CFBundlePrimaryIcon = {
-        CFBundleIconFiles: ["AppIcon"],
-      };
-    }
-
-    // Apply for both tablet and phone support
-    applyToPlist("CFBundleIcons");
-    applyToPlist("CFBundleIcons~ipad");
-
-    return config;
-  });
-};
 
 const withIconIosImages: ConfigPlugin<Props> = (config, props) => {
   return withDangerousMod(config, [
@@ -388,32 +237,91 @@ async function createIconsAsync(
   await fs.promises.mkdir(path.join(iosRoot, iosFolderName), {
     recursive: true,
   });
+
+  let content : {
+    images: {
+      appearances? : {
+        appearance: string,
+        value: string
+      }[],
+      filename: string,
+      idiom: string,
+      platform: string,
+      size: string,
+    }[],
+    info: {
+      author: string,
+      version: number
+    }
+  } = {
+    images: [],
+    info : {
+      author : "xcode",
+      version : 1
+    }
+  };
+
   // Generate new assets
   await iterateIconsAsync({ icons }, async (key, icon) => {
-    for (const scale of iosScales) {
-      const iconFileName = getIconName(key, iosSize, scale);
-      const fileName = path.join(iosFolderName, iconFileName);
-      const outputPath = path.join(iosRoot, fileName);
+    content.images = [];
+    // Delete all existing assets
+    await fs.promises
+      .rm(path.join(iosRoot, `${iosFolderName}/${key}.appiconset`), { recursive: true, force: true })
+      .catch(() => null);
+    // Ensure directory exists
+    await fs.promises.mkdir(path.join(iosRoot, `${iosFolderName}/${key}.appiconset`), {
+      recursive: true,
+    });
+    const iconFileName = getIconName(key, iosSize) + '.png';
+    //const fileName = path.join(`${iosFolderName}/${key}.appiconset`, iconFileName);
+    const platform = 'ios';
+    const size = `${iosSize}x${iosSize}`;
 
-      const scaledSize = Math.ceil(scale * iosSize);
+    const iconVariants = [
+      {
+        src: icon.image,
+        filename: iconFileName,
+        appearances: []
+      },
+      {
+        src: icon.iosImageDark,
+        filename: iconFileName.replace(/(skin_tone_\d+)(.*)/, `$1_dark$2`),
+        appearances: [{ appearance: 'luminosity', value: 'dark' }] 
+      },
+      {
+        src: icon.iosImageTinted,
+        filename: iconFileName.replace(/(skin_tone_\d+)(.*)/, `$1_tinted$2`),
+        appearances: [{ appearance: 'luminosity', value: 'tinted' }] 
+      }
+    ];
+    
+    for (const variant of iconVariants) {
+      const { src, filename, appearances } = variant;
       const { source } = await generateImageAsync(
         {
           projectRoot: config.modRequest.projectRoot,
           cacheType: "react-native-dynamic-app-icon",
         },
         {
-          name: iconFileName,
-          src: icon.image,
-          removeTransparency: true,
-          backgroundColor: "#ffffff",
+          name: filename,
+          src,
+          removeTransparency: false,
+          backgroundColor: "transparent",
           resizeMode: "cover",
-          width: scaledSize,
-          height: scaledSize,
+          width: iosSize,
+          height: iosSize,
         }
       );
-
-      await fs.promises.writeFile(outputPath, source);
+      content.images.push({
+        ...(appearances.length ? { appearances } : {}),
+        filename,
+        idiom: "universal",
+        platform,
+        size,
+      });
+      await fs.promises.writeFile(path.join(iosRoot, `${iosFolderName}/${key}.appiconset`, filename), source);
     }
+    await fs.promises.writeFile(path.join(iosRoot, `${iosFolderName}/${key}.appiconset/Contents.json`), JSON.stringify(content));
   });
 }
 
@@ -421,7 +329,7 @@ async function iterateIconsAsync(
   { icons }: Props,
   callback: (
     key: string,
-    icon: { image: string; prerendered?: boolean },
+    icon: any,
     index: number
   ) => Promise<void>
 ) {
