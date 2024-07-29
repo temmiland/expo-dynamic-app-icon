@@ -35,12 +35,21 @@
         {
           "red": {
             "image": "./assets/icon1.png",
+			"androidImageMonochrome": "./assets/icon1-tinted.png",
+			"iosImageDark": "./assets/icon1-dark.png",
+            "iosImageTinted": "./assets/icon1-tinted.png",
+			"platforms": ["android", "ios"], 
             "prerendered": true
           },
           "gray": {
             "image": "./assets/icon2.png",
+			"androidImageMonochrome": "./assets/icon2-tinted.png",
+			"iosImageDark": "./assets/icon2-dark.png",
+            "iosImageTinted": "./assets/icon2-tinted.png",
+			"platforms": ["android", "ios"], 
             "prerendered": true
           }
+            
         }
       ]
     ]
