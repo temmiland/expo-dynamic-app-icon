@@ -5,6 +5,9 @@ import {
   withAndroidManifest,
   withXcodeProject,
   AndroidConfig,
+  withInfoPlist,
+  IOSConfig,
+  XcodeProject,
 } from "@expo/config-plugins";
 import { generateImageAsync } from "@expo/image-utils";
 import fs from "fs";
@@ -24,76 +27,62 @@ const androidFolderNames = [
 ];
 const androidSize = [162, 108, 216, 324, 432];
 
-const iosFolderName = "Images.xcassets/DynamicAppIcons";
-const iosSize = 1024;
+const iosLiquidGlassAppIcons = "AppIcons";
 
 type Platform = "ios" | "android";
 
 type Icon = {
-  image: string;
-  androidImageMonochrome: string;
-  iosImageDark: string;
-  iosImageTinted: string;
-  prerendered?: boolean;
-  platforms?: Platform[];
+  name: string;
+  isMainIcon?: boolean;
+  androidForeground: string;
+  androidMonochrome: string;
+  iosIconFile: string;
+  platforms: Platform[];
 };
 
-type IconSet = Record<string, Icon>;
-
-type Props = {
-  icons: Record<string, Icon>;
+type PluginSettings = {
+  expoDynAppIconPath: string;
+  icons: Icon[];
 };
 
-function arrayToImages(images: string[]) {
-  return images.reduce(
-    (prev, curr, i) => ({ ...prev, [i]: { image: curr } }),
-    {},
-  );
-}
-
-const findIconsForPlatform = (icons: IconSet, platform: Platform) => {
-  return Object.keys(icons)
-    .filter((key) => {
-      const icon = icons[key];
-      if (icon.platforms) {
-        return icon["platforms"].includes(platform);
-      }
-      return true;
-    })
-    .reduce((prev, curr) => ({ ...prev, [curr]: icons[curr] }), {});
-};
-
-const withDynamicIcon: ConfigPlugin<string[] | IconSet | void> = (
+const withDynamicIcon: ConfigPlugin<PluginSettings> = (
   config,
-  props = {},
+  props = {
+    expoDynAppIconPath: "assets/dynamic-app-icons",
+    icons: [],
+  },
 ) => {
-  const _props = props || {};
+  const { expoDynAppIconPath, icons } = props;
 
-  let prepped: Props["icons"] = {};
+  const iosIcons = findIconsForPlatform(icons, "ios");
+  console.log("iOS Icons:", iosIcons);
 
-  if (Array.isArray(_props)) {
-    prepped = arrayToImages(_props);
-  } else if (_props) {
-    prepped = _props;
+  if (iosIcons.length > 0) {
+    config = withIosIcon(config, { expoDynAppIconPath, icons: iosIcons });
+    config = withXcodeBuildSettings(config, {
+      expoDynAppIconPath,
+      icons: iosIcons,
+    });
   }
 
-  const iOSIcons = findIconsForPlatform(prepped, "ios");
-  const iOSIconsLength = Object.keys(iOSIcons).length;
-  if (iOSIconsLength > 0) {
-    config = withIconIosImages(config, { icons: iOSIcons });
-    config = withXcodeBuildSettings(config, { icons: iOSIcons });
-  }
-  const androidIcons = findIconsForPlatform(prepped, "android");
-  const androidIconsLength = Object.keys(androidIcons).length;
-  if (androidIconsLength > 0) {
-    config = withIconAndroidManifest(config, { icons: androidIcons });
-    config = withIconAndroidImages(config, { icons: androidIcons });
-  }
+  //const androidIcons = findIconsForPlatform(prepped, "android");
+  //const androidIconsLength = Object.keys(androidIcons).length;
+  //if (androidIconsLength > 0) {
+  //  config = withIconAndroidManifest(config, { icons: androidIcons });
+  //  config = withIconAndroidImages(config, { icons: androidIcons });
+  //}
   return config;
 };
 
+const findIconsForPlatform = (icons: Icon[], platform: Platform) => {
+  return icons.filter((icon) => icon.platforms.includes(platform));
+};
+
 // for aos
-const withIconAndroidManifest: ConfigPlugin<Props> = (config, { icons }) => {
+const withIconAndroidManifest: ConfigPlugin<PluginSettings> = (
+  config,
+  { icons },
+) => {
   return withAndroidManifest(config, (config) => {
     const mainApplication: any = getMainApplicationOrThrow(config.modResults);
     const mainActivity = getMainActivityOrThrow(config.modResults);
@@ -147,7 +136,10 @@ const withIconAndroidManifest: ConfigPlugin<Props> = (config, { icons }) => {
   });
 };
 
-const withIconAndroidImages: ConfigPlugin<Props> = (config, { icons }) => {
+const withIconAndroidImages: ConfigPlugin<PluginSettings> = (
+  config,
+  { icons },
+) => {
   return withDangerousMod(config, [
     "android",
     async (config) => {
@@ -176,7 +168,7 @@ const withIconAndroidImages: ConfigPlugin<Props> = (config, { icons }) => {
           const outputPath = path.join(androidResPath, androidFolderNames[i]);
           for (const [
             name,
-            { image, androidImageMonochrome },
+            { androidForeground, androidMonochrome },
           ] of Object.entries(icons)) {
             const generateAndSaveImage = async (
               name: string,
@@ -205,12 +197,9 @@ const withIconAndroidImages: ConfigPlugin<Props> = (config, { icons }) => {
             const foregroundFileName = `${name}-${size}_foreground.png`;
             const monochromeFileName = `${name}-${size}_monochrome.png`;
 
-            await generateAndSaveImage(fileName, image, true);
-            await generateAndSaveImage(foregroundFileName, image);
-            await generateAndSaveImage(
-              monochromeFileName,
-              androidImageMonochrome,
-            );
+            await generateAndSaveImage(fileName, androidForeground, true);
+            await generateAndSaveImage(foregroundFileName, androidForeground);
+            await generateAndSaveImage(monochromeFileName, androidMonochrome);
           }
         }
       };
@@ -269,37 +258,18 @@ const withIconAndroidImages: ConfigPlugin<Props> = (config, { icons }) => {
 
 // for ios
 
-function getIconName(name: string, size: number) {
-  return `${name}-Icon-${size}x${size}`;
-}
-
-const withXcodeBuildSettings: ConfigPlugin<Props> = (config, { icons }) => {
-  return withXcodeProject(config, (config) => {
-    const xcodeProject = config.modResults;
-
-    xcodeProject.addBuildProperty(
-      '"ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES[sdk=*]"',
-      `"${Object.keys(icons).join(" ")}"`,
-    );
-
-    return config;
-  });
-};
-
-const withIconIosImages: ConfigPlugin<Props> = (config, props) => {
+const withIosIcon: ConfigPlugin<PluginSettings> = (config, props) => {
   return withDangerousMod(config, [
     "ios",
     async (config) => {
-      await createIconsAsync(config, props);
+      await cleanDirAndEnsureDirExists(config);
+      await iterateIconsAsync(config, props);
       return config;
     },
   ]);
 };
 
-async function createIconsAsync(
-  config: ExportedConfigWithProps,
-  { icons }: Props,
-) {
+async function cleanDirAndEnsureDirExists(config: ExportedConfigWithProps) {
   const iosRoot = path.join(
     config.modRequest.platformProjectRoot,
     config.modRequest.projectName!,
@@ -307,132 +277,112 @@ async function createIconsAsync(
 
   // Delete all existing assets
   await fs.promises
-    .rm(path.join(iosRoot, iosFolderName), { recursive: true, force: true })
+    .rm(path.join(iosRoot, iosLiquidGlassAppIcons), {
+      recursive: true,
+      force: true,
+    })
     .catch(() => null);
+
   // Ensure directory exists
-  await fs.promises.mkdir(path.join(iosRoot, iosFolderName), {
+  await fs.promises.mkdir(path.join(iosRoot, iosLiquidGlassAppIcons), {
     recursive: true,
-  });
-
-  const content: {
-    images: {
-      appearances?: {
-        appearance: string;
-        value: string;
-      }[];
-      filename: string;
-      idiom: string;
-      platform: string;
-      size: string;
-    }[];
-    info: {
-      author: string;
-      version: number;
-    };
-  } = {
-    images: [],
-    info: {
-      author: "xcode",
-      version: 1,
-    },
-  };
-
-  // Generate new assets
-  await iterateIconsAsync({ icons }, async (key, icon) => {
-    content.images = [];
-    // Delete all existing assets
-    await fs.promises
-      .rm(path.join(iosRoot, `${iosFolderName}/${key}.appiconset`), {
-        recursive: true,
-        force: true,
-      })
-      .catch(() => null);
-    // Ensure directory exists
-    await fs.promises.mkdir(
-      path.join(iosRoot, `${iosFolderName}/${key}.appiconset`),
-      {
-        recursive: true,
-      },
-    );
-    const platform = "ios";
-    const size = `${iosSize}x${iosSize}`;
-
-    const iconVariants = [
-      {
-        src: icon.image,
-        filename: getIconName(key, iosSize) + ".png",
-        appearances: [],
-        removeTransparency: true,
-        backgroundColor: "#ffffff",
-      },
-      {
-        src: icon.iosImageDark,
-        filename: getIconName(key, iosSize) + "_dark.png",
-        appearances: [{ appearance: "luminosity", value: "dark" }],
-        removeTransparency: false,
-        backgroundColor: "transparent",
-      },
-      {
-        src: icon.iosImageTinted,
-        filename: getIconName(key, iosSize) + "_tinted.png",
-        appearances: [{ appearance: "luminosity", value: "tinted" }],
-        removeTransparency: false,
-        backgroundColor: "transparent",
-      },
-    ];
-
-    for (const variant of iconVariants) {
-      const {
-        src,
-        filename,
-        appearances,
-        removeTransparency,
-        backgroundColor,
-      } = variant;
-      const { source } = await generateImageAsync(
-        {
-          projectRoot: config.modRequest.projectRoot,
-          cacheType: "react-native-dynamic-app-icon",
-        },
-        {
-          name: filename,
-          src,
-          removeTransparency,
-          backgroundColor,
-          resizeMode: "cover",
-          width: iosSize,
-          height: iosSize,
-        },
-      );
-      content.images.push({
-        ...(appearances.length ? { appearances } : {}),
-        filename,
-        idiom: "universal",
-        platform,
-        size,
-      });
-      await fs.promises.writeFile(
-        path.join(iosRoot, `${iosFolderName}/${key}.appiconset`, filename),
-        source,
-      );
-    }
-    await fs.promises.writeFile(
-      path.join(iosRoot, `${iosFolderName}/${key}.appiconset/Contents.json`),
-      JSON.stringify(content),
-    );
   });
 }
 
 async function iterateIconsAsync(
-  { icons }: Props,
-  callback: (key: string, icon: any, index: number) => Promise<void>,
+  config: ExportedConfigWithProps,
+  props: PluginSettings,
 ) {
-  const entries = Object.entries(icons);
-  for (let i = 0; i < entries.length; i++) {
-    const [key, val] = entries[i];
+  const { expoDynAppIconPath, icons } = props;
+  const iosRoot = path.join(
+    config.modRequest.platformProjectRoot,
+    config.modRequest.projectName!,
+  );
 
-    await callback(key, val, i);
-  }
+  icons.forEach((icon) => {
+    if (icon.iosIconFile) {
+      const locationPath = path.join(
+        config.modRequest.projectRoot,
+        expoDynAppIconPath,
+        icon.iosIconFile,
+      );
+
+      const destinationPath = path.join(
+        iosRoot,
+        iosLiquidGlassAppIcons,
+        icon.name + ".icon",
+      );
+
+      fs.promises.cp(locationPath, destinationPath, { recursive: true });
+    }
+  });
 }
+
+const getAppTargetUuid = (xcodeProject: XcodeProject, projectName: string) => {
+  const nativeTargets = xcodeProject.pbxNativeTargetSection() as {
+    name: string;
+    [key: string]: any;
+  };
+  for (const [uuid, target] of Object.entries(nativeTargets)) {
+    if (target.name === `"${projectName}"` || target.name === projectName) {
+      return uuid;
+    }
+  }
+  throw new Error(`No native target found for project "${projectName}"`);
+};
+
+const withXcodeBuildSettings: ConfigPlugin<PluginSettings> = (
+  config,
+  { icons },
+) => {
+  return withXcodeProject(config, (config) => {
+    const xcodeProject = config.modResults;
+    const iconNames = icons.map((icon) => icon.name);
+
+    const mainIcon = icons.filter((icon) => icon.isMainIcon === true)[0];
+
+    if (!mainIcon) throw new Error("No main icon defined");
+
+    const targetUuid = getAppTargetUuid(
+      xcodeProject,
+      config.modRequest.projectName!,
+    );
+    console.log("Target UUID:", targetUuid);
+    console.log(getAppTargetUuid(xcodeProject, config.modRequest.projectName!));
+
+    icons.forEach((icon) => {
+      IOSConfig.XcodeUtils.addFileToGroupAndLink({
+        filepath: path.join(
+          config.modRequest.platformProjectRoot,
+          config.modRequest.projectName!,
+          iosLiquidGlassAppIcons,
+          icon.name + ".icon",
+        ),
+        groupName: config.modRequest.projectName!,
+        project: xcodeProject,
+        targetUuid: getAppTargetUuid(
+          xcodeProject,
+          config.modRequest.projectName!,
+        ),
+        addFileToProject({ project, file }) {
+          project.addToPbxFileReferenceSection(file);
+          project.addToPbxBuildFileSection(file);
+          project.addToPbxResourcesBuildPhase(file);
+        },
+      });
+    });
+
+    xcodeProject.addBuildProperty(
+      '"ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES[sdk=*]"',
+      `"${iconNames.join(" ")}"`,
+    );
+    xcodeProject.addBuildProperty(
+      "ASSETCATALOG_COMPILER_APPICON_NAME",
+      `${mainIcon.name}`,
+    );
+
+    return config;
+  });
+};
 
 export default withDynamicIcon;
