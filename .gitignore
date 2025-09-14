@@ -1,0 +1,66 @@
+# =========================
+# macOS
+# =========================
+.DS_Store
+
+# =========================
+# VSCode
+# =========================
+.vscode/
+jsconfig.json
+
+# =========================
+# Node / JavaScript
+# =========================
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.env
+.expo/
+.expo-shared/
+build/
+plugin/build/
+
+# =========================
+# iOS / Xcode
+# =========================
+ios/Pods/
+ios/DerivedData/
+*.xcworkspace
+*.xcodeproj/project.xcworkspace
+*.xcuserstate
+*.xcscmblueprint
+*.hmap
+*.ipa
+
+# =========================
+# Android / Gradle
+# =========================
+android/build/
+android/app/build/
+.cxx/
+.gradle/
+captures/
+*.keystore
+local.properties
+
+# =========================
+# Ruby / CocoaPods
+# =========================
+example/vendor/
+*.gem
+
+# =========================
+# BUCK
+# =========================
+buck-out/
+\.buckd/
+
+# =========================
+# IDE / Editor
+# =========================
+.idea/
+.project
+.settings
+*.iml
